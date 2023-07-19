@@ -1,6 +1,12 @@
 import pygame
 from sys import exit
+
+from sys import exit
 import random
+import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.optimizers import Adam
 
 pygame.init()
 clock = pygame.time.Clock()
@@ -27,6 +33,52 @@ bird_start_position = (100, 250)
 score = 0
 font = pygame.font.SysFont('Segoe', 26)
 game_stopped = True
+
+# Create the Q-learning model
+model = Sequential()
+model.add(Dense(32, input_shape=(4,), activation='relu'))
+model.add(Dense(32, activation='relu'))
+model.add(Dense(2, activation='linear'))
+model.compile(loss='mse', optimizer=Adam())
+
+
+# Function to preprocess the game state
+def preprocess_state(bird, pipes):
+    # Normalize the bird's y position and the distance to the next pipe
+    bird_y = bird.rect.y / win_height
+    next_pipe = None
+    for pipe in pipes:
+        if pipe.rect.x > bird.rect.x:
+            next_pipe = pipe
+            break
+    if next_pipe:
+        pipe_dist = (next_pipe.rect.x - bird.rect.x) / win_width
+        pipe_top = next_pipe.rect.y / win_height
+        pipe_bottom = (next_pipe.rect.y + next_pipe.rect.height) / win_height
+    else:
+        # If there are no pipes, set the distance to 1
+        pipe_dist = 1.0
+        pipe_top = 1.0
+        pipe_bottom = 1.0
+    return np.array([bird_y, pipe_dist, pipe_top, pipe_bottom])
+
+# Function to choose an action based on the Q-values
+def choose_action(state, epsilon):
+    if np.random.rand() < epsilon:
+        # Choose a random action (exploration)
+        return np.random.randint(2)
+    else:
+        # Choose the action with the highest Q-value (exploitation)
+        q_values = model.predict(np.array([state]))[0]
+        return np.argmax(q_values)
+    
+# Function to update the Q-values based on the Bellman equation
+def update_q_values(states, actions, rewards, next_states, dones, gamma):
+    targets = rewards + gamma * np.max(model.predict(next_states), axis=1) * (1 - dones)
+    q_values = model.predict(states)
+    for i in range(len(actions)):
+        q_values[i][actions[i]] = targets[i]
+    model.fit(states, q_values, verbose=0)
 
 
 class Bird(pygame.sprite.Sprite):
@@ -118,10 +170,20 @@ def quit_game():
 # Game Main Method
 def main():
     global score
-
+    
     # Instantiate Bird
     bird = pygame.sprite.GroupSingle()
     bird.add(Bird())
+    
+    
+    epsilon = 1.0  # Exploration rate
+    epsilon_decay = 0.999  # Decay rate for exploration rate
+    epsilon_min = 0.01  # Minimum exploration rate
+    gamma = 0.99  # Discount factor for future rewards
+    max_episodes = 1000  # Maximum number of episodes
+    max_steps = 1000  # Maximum number of steps per episode
+
+
 
     # Setup Pipes
     pipe_timer = 0
@@ -133,62 +195,111 @@ def main():
     ground.add(Ground(x_pos_ground, y_pos_ground))
 
     run = True
-    while run:
-        # Quit
-        quit_game()
+    for episode in range(max_episodes):
 
-        # Reset Frame
-        window.fill((0, 0, 0))
+        # Reset the game...
+        bird.sprite.alive = True
+        bird.sprite.rect.center = bird_start_position
+        score = 0
+        pipes.empty()
+        ground.empty()
+        ground.add(Ground(x_pos_ground, y_pos_ground))
 
-        # User Input
-        user_input = pygame.key.get_pressed()
+        for step in range(max_steps):
+            # Quit...
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    exit()
 
-        # Draw Background
-        window.blit(skyline_image, (0, 0))
+            # Reset Frame
+            window.fill((0, 0, 0))
 
-        # Spawn Ground
-        if len(ground) <= 2:
-            ground.add(Ground(win_width, y_pos_ground))
+            # User Input
+            user_input = pygame.key.get_pressed()
 
-        # Draw - Pipes, Ground and Bird
-        pipes.draw(window)
-        ground.draw(window)
-        bird.draw(window)
+            # Draw Background
+            window.blit(skyline_image, (0, 0))
 
-        # Show Score
-        score_text = font.render('Score: ' + str(score), True, pygame.Color(255, 255, 255))
-        window.blit(score_text, (20, 20))
+            # Spawn Ground
+            if len(ground) <= 2:
+                ground.add(Ground(win_width, y_pos_ground))
 
-        # Update - Pipes, Ground and Bird
-        if bird.sprite.alive:
-            pipes.update()
-            ground.update()
-        bird.update(user_input)
+            # Draw - Pipes, Ground and Bird
+            pipes.draw(window)
+            ground.draw(window)
+            bird.draw(window)
 
-        # Collision Detection
-        collision_pipes = pygame.sprite.spritecollide(bird.sprites()[0], pipes, False)
-        collision_ground = pygame.sprite.spritecollide(bird.sprites()[0], ground, False)
-        if collision_pipes or collision_ground:
-            bird.sprite.alive = False
-            if collision_ground:
-                window.blit(game_over_image, (win_width // 2 - game_over_image.get_width() // 2,
-                                              win_height // 2 - game_over_image.get_height() // 2))
-                if user_input[pygame.K_r]:
-                    score = 0
-                    break
+            # Show Score
+            score_text = font.render('Score: ' + str(score), True, pygame.Color(255, 255, 255))
+            window.blit(score_text, (20, 20))
 
-        # Spawn Pipes
-        if pipe_timer <= 0 and bird.sprite.alive:
-            x_top, x_bottom = 550, 550
-            y_top = random.randint(-600, -480)
-            y_bottom = y_top + random.randint(90, 130) + bottom_pipe_image.get_height()
-            pipes.add(Pipe(x_top, y_top, top_pipe_image, 'top'))
-            pipes.add(Pipe(x_bottom, y_bottom, bottom_pipe_image, 'bottom'))
-            pipe_timer = random.randint(180, 250)
-        pipe_timer -= 1
+            # Choose an action...
+            state = preprocess_state(bird.sprite, pipes)
+            action = choose_action(state, epsilon)
+            
+            
+            # Take the action and observe the next state and reward...
+            if action == 0:
+                bird.sprite.flap = True
 
-        clock.tick(60)
-        pygame.display.update()
+
+
+
+            # Update - Pipes, Ground and Bird
+            if bird.sprite.alive:
+                pipes.update()
+                ground.update()
+            bird.update(user_input)
+
+            # Collision Detection
+            collision_pipes = pygame.sprite.spritecollide(bird.sprites()[0], pipes, False)
+            collision_ground = pygame.sprite.spritecollide(bird.sprites()[0], ground, False)
+            if collision_pipes or collision_ground:
+                bird.sprite.alive = False
+                if collision_ground:
+                    window.blit(game_over_image, (win_width // 2 - game_over_image.get_width() // 2,
+                                                win_height // 2 - game_over_image.get_height() // 2))
+                    if user_input[pygame.K_r]:
+                        score = 0
+                        break
+                    
+            # Preprocess the next state...
+            next_state = preprocess_state(bird.sprite, pipes)
+
+                # Determine the reward...
+            reward = 1 if bird.sprite.alive else -1
+            
+                        # Determine if the episode is done...
+            done = not bird.sprite.alive
+
+            # Update the Q-values...
+            if bird.sprite.alive:
+                update_q_values(np.array([state]), np.array([action]), np.array([reward]), np.array([next_state]), np.array([done]), gamma)
+
+            
+
+            # Spawn Pipes
+            if pipe_timer <= 0 and bird.sprite.alive:
+                x_top, x_bottom = 550, 550
+                y_top = random.randint(-600, -480)
+                y_bottom = y_top + random.randint(90, 130) + bottom_pipe_image.get_height()
+                pipes.add(Pipe(x_top, y_top, top_pipe_image, 'top'))
+                pipes.add(Pipe(x_bottom, y_bottom, bottom_pipe_image, 'bottom'))
+                pipe_timer = random.randint(180, 250)
+            pipe_timer -= 1
+
+            clock.tick(60)
+            pygame.display.update()
+            
+            if done:
+                break
+        
+        # Decay the exploration rate...
+        epsilon *= epsilon_decay
+        epsilon = max(epsilon, epsilon_min)
+
+        
 
 
 # Menu
