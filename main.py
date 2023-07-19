@@ -1,7 +1,4 @@
 import pygame
-from sys import exit
-
-from sys import exit
 import random
 import numpy as np
 from tensorflow.keras.models import Sequential
@@ -41,7 +38,6 @@ model.add(Dense(32, activation='relu'))
 model.add(Dense(2, activation='linear'))
 model.compile(loss='mse', optimizer=Adam())
 
-
 # Function to preprocess the game state
 def preprocess_state(bird, pipes):
     # Normalize the bird's y position and the distance to the next pipe
@@ -80,7 +76,6 @@ def update_q_values(states, actions, rewards, next_states, dones, gamma):
         q_values[i][actions[i]] = targets[i]
     model.fit(states, q_values, verbose=0)
 
-
 class Bird(pygame.sprite.Sprite):
     def __init__(self):
         pygame.sprite.Sprite.__init__(self)
@@ -117,7 +112,6 @@ class Bird(pygame.sprite.Sprite):
             self.flap = True
             self.vel = -7
 
-
 class Pipe(pygame.sprite.Sprite):
     def __init__(self, x, y, image, pipe_type):
         pygame.sprite.Sprite.__init__(self)
@@ -144,7 +138,6 @@ class Pipe(pygame.sprite.Sprite):
                 self.passed = True
                 score += 1
 
-
 class Ground(pygame.sprite.Sprite):
     def __init__(self, x, y):
         pygame.sprite.Sprite.__init__(self)
@@ -158,7 +151,6 @@ class Ground(pygame.sprite.Sprite):
         if self.rect.x <= -win_width:
             self.kill()
 
-
 def quit_game():
     # Exit Game
     for event in pygame.event.get():
@@ -166,15 +158,12 @@ def quit_game():
             pygame.quit()
             exit()
 
-
 # Game Main Method
 def main():
     global score
     
     # Instantiate Bird
-    bird = pygame.sprite.GroupSingle()
-    bird.add(Bird())
-    
+    bird = Bird()
     
     epsilon = 1.0  # Exploration rate
     epsilon_decay = 0.999  # Decay rate for exploration rate
@@ -182,9 +171,7 @@ def main():
     gamma = 0.99  # Discount factor for future rewards
     max_episodes = 1000  # Maximum number of episodes
     max_steps = 1000  # Maximum number of steps per episode
-
-
-
+    
     # Setup Pipes
     pipe_timer = 0
     pipes = pygame.sprite.Group()
@@ -196,10 +183,10 @@ def main():
 
     run = True
     for episode in range(max_episodes):
-
         # Reset the game...
-        bird.sprite.alive = True
-        bird.sprite.rect.center = bird_start_position
+        bird.alive = True
+        bird.rect.center = bird_start_position
+        bird.vel = 0
         score = 0
         pipes.empty()
         ground.empty()
@@ -225,62 +212,57 @@ def main():
             if len(ground) <= 2:
                 ground.add(Ground(win_width, y_pos_ground))
 
-            # Draw - Pipes, Ground and Bird
+            # Draw - Pipes, Ground, and Bird
             pipes.draw(window)
             ground.draw(window)
-            bird.draw(window)
+            window.blit(bird.image, bird.rect)
 
             # Show Score
             score_text = font.render('Score: ' + str(score), True, pygame.Color(255, 255, 255))
             window.blit(score_text, (20, 20))
 
             # Choose an action...
-            state = preprocess_state(bird.sprite, pipes)
+            state = preprocess_state(bird, pipes)
             action = choose_action(state, epsilon)
-            
-            
+
             # Take the action and observe the next state and reward...
             if action == 0:
-                bird.sprite.flap = True
+                bird.flap = True
 
-
-
-
-            # Update - Pipes, Ground and Bird
-            if bird.sprite.alive:
+            # Update - Pipes, Ground, and Bird
+            if bird.alive:
                 pipes.update()
                 ground.update()
             bird.update(user_input)
 
             # Collision Detection
-            collision_pipes = pygame.sprite.spritecollide(bird.sprites()[0], pipes, False)
-            collision_ground = pygame.sprite.spritecollide(bird.sprites()[0], ground, False)
+            collision_pipes = pygame.sprite.spritecollide(bird, pipes, False)
+            collision_ground = pygame.sprite.spritecollide(bird, ground, False)
             if collision_pipes or collision_ground:
-                bird.sprite.alive = False
+                bird.alive = False
                 if collision_ground:
                     window.blit(game_over_image, (win_width // 2 - game_over_image.get_width() // 2,
                                                 win_height // 2 - game_over_image.get_height() // 2))
                     if user_input[pygame.K_r]:
                         score = 0
                         break
-                    
-            # Preprocess the next state...
-            next_state = preprocess_state(bird.sprite, pipes)
 
-                # Determine the reward...
-            reward = 1 if bird.sprite.alive else -1
-            
-                        # Determine if the episode is done...
-            done = not bird.sprite.alive
+            # Show Score
+
+            # Preprocess the next state...
+            next_state = preprocess_state(bird, pipes)
+
+            # Determine the reward...
+            reward = 1 if bird.alive else -1
+
+            # Determine if the episode is done...
+            done = not bird.alive
 
             # Update the Q-values...
-            if bird.sprite.alive:
-                update_q_values(np.array([state]), np.array([action]), np.array([reward]), np.array([next_state]), np.array([done]), gamma)
-
-            
+            update_q_values(np.array([state]), np.array([action]), np.array([reward]), np.array([next_state]), np.array([done]), gamma)
 
             # Spawn Pipes
-            if pipe_timer <= 0 and bird.sprite.alive:
+            if pipe_timer <= 0 and bird.alive:
                 x_top, x_bottom = 550, 550
                 y_top = random.randint(-600, -480)
                 y_bottom = y_top + random.randint(90, 130) + bottom_pipe_image.get_height()
@@ -291,16 +273,13 @@ def main():
 
             clock.tick(60)
             pygame.display.update()
-            
+
             if done:
                 break
-        
+
         # Decay the exploration rate...
         epsilon *= epsilon_decay
         epsilon = max(epsilon, epsilon_min)
-
-        
-
 
 # Menu
 def menu():
@@ -323,6 +302,5 @@ def menu():
             main()
 
         pygame.display.update()
-
 
 menu()
