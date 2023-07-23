@@ -11,8 +11,6 @@ WIN_WIDTH = 500
 DRAW_LINES = False
 GEN = 0  # declaring generation variable
 
-last_pipe_x = 0
-
 
 pygame.display.set_caption("Flappy Bird")
 
@@ -28,7 +26,7 @@ game_over_image = pygame.image.load("assets/game_over.png")
 start_image = pygame.image.load("assets/start.png")
 
 # declaring font
-STAT_FONT = pygame.font.SysFont('Segoe', 50)
+STAT_FONT = pygame.font.SysFont('freesansbold', 50)
 game_started = False
 
 
@@ -208,12 +206,12 @@ def draw_window(win, birds, pipes, base, score, GEN, pipe_ind):
 
 
 def main(genomes, config):
-    global GEN, last_pipe_x
+    global GEN, game_started
     GEN += 1
     birds = []
     ge = []
     neural_networks = []
-
+    
     pygame.init()
     win = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
     pygame.display.set_caption("Flappy Bird")
@@ -225,30 +223,54 @@ def main(genomes, config):
         g.fitness = 0
         ge.append(g)
 
-    pipes = [Pipe(500)]
+    pipes = [Pipe(500)]  # list of pipe objects
     base_object = Base(630)
+    win = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
     clock = pygame.time.Clock()
     run = True
     score = 0
+    # while game_started == False:
+    #     win.fill((0, 0, 0))
+    #     win.blit(skyline_image, (0, 0))
+    #     win.blit(ground_image, (0, 520))
+    #     win.blit(bird_images[0], (100, 250))
+    #     win.blit(start_image, (WIN_WIDTH // 2 - start_image.get_width() // 2,
+    #                            WIN_HEIGHT // 2 - start_image.get_height() // 2))
+
+    #     # User Input
+    #     user_input = pygame.key.get_pressed()
+    #     if user_input[pygame.K_SPACE]:
+    #         game_started = True
+
+    #     pygame.display.update()
+
+
+
+    # OUR main running loop
 
     while run:
-        clock.tick(30)
+        
+        clock.tick(30)  # fps
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            if event.type == pygame.QUIT:  # if the user click on the red cross button then quit the game
                 run = False
                 pygame.quit()
                 quit()
 
         pipe_ind = 0
+
+        # this part is done to check in the case when 2 pipes appear on the screen that which is the pipe we are evaluating on
         if len(birds) > 0:
             if len(pipes) > 1 and birds[0].x > pipes[0].x + pipes[0].TOP_PIPE.get_width():
                 pipe_ind = 1
-        else:
+
+        else:  # if all the birds are dead then exit the loop
             break
 
-        for x, bird in enumerate(birds):
+        for x, bird in enumerate(birds):  # traversing every bird
             bird.move()
-            ge[x].fitness += 0.1
+            ge[x].fitness += 0.1  # incrementing little fitness to keep them moving
+            # this is the output list which the nn is giving for all the birds whether to jump or not
             output = neural_networks[x].activate((bird.y, abs(bird.y - pipes[pipe_ind].height),
                                                   abs(bird.y - pipes[pipe_ind].bottom)))
             if output[0] > 0.5:
@@ -256,21 +278,21 @@ def main(genomes, config):
 
         for pipe in pipes:
             for x, bird in enumerate(birds):
+                # checking if the bird has hit the ground or if the pipe and bird collide
                 if pipe.collide(bird) or (bird.y + bird.img.get_height() >= 630 or bird.y < 0):
-                    ge[x].fitness -= 1
+                    ge[x].fitness -= 1  # remove all things of that bird from that bird's position
                     birds.pop(x)
                     ge.pop(x)
                     neural_networks.pop(x)
 
-                if not pipe.passed and bird.x > pipe.x:
+                if not pipe.passed and bird.x > pipe.x:  # if the passed is not set to true and bird has passed the pipe then set it to true
                     pipe.passed = True
                     for g in ge:
-                        g.fitness += 5
+                        g.fitness += 5  # adding fitness to birds which passed
                     score += 1
-                    last_pipe_x = pipe.x
-                    pipes.append(Pipe(last_pipe_x + 200))
+                    pipes.append(Pipe(500))  # add another pipe
 
-            if pipe.x + pipe.TOP_PIPE.get_width() < 0:
+            if pipe.x + pipe.TOP_PIPE.get_width() < 0:  # if pipe passed the screen add it to remove list
                 pipes.remove(pipe)
 
             pipe.move()
@@ -279,6 +301,7 @@ def main(genomes, config):
         draw_window(win, birds, pipes, base_object, score, GEN, pipe_ind)
 
     pygame.quit()
+
 
 def run(config_path):
     config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
@@ -291,8 +314,7 @@ def run(config_path):
     winner = population.run(main, 50)
     print('\nBest genome:\n{!s}'.format(winner))
 
+
 if __name__ == '__main__':
-    config_path = "config-feedforward.txt"
-    run(config_path)
     config_path = "config-feedforward.txt"
     run(config_path)
