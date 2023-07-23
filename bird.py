@@ -110,7 +110,7 @@ class Pipe:
         self.height = 0  # for random purpose
         self.top = 0  # y coordinates of top pipe
         self.bottom = 0  # y coordinates of bottom pipe
-        self.TOP_PIPE = pygame.transform.flip(top_pipe_image, False, True)
+        self.TOP_PIPE = top_pipe_image
         self.BOTTOM_PIPE = bottom_pipe_image
         self.passed = False
         self.set_height()
