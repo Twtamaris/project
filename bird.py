@@ -1,20 +1,22 @@
-
 import pygame
+import time
+import neat
+import os
 import random
-import numpy as np
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.optimizers import Adam
 
-pygame.init()
-clock = pygame.time.Clock()
+pygame.font.init()  # some initialization to use font in pygame
 
-# Window
-win_height = 720
-win_width = 551
-window = pygame.display.set_mode((win_width, win_height))
+WIN_HEIGHT = 800
+WIN_WIDTH = 500
+DRAW_LINES = False
+GEN = 0  # declaring generation variable
 
-# Images
+last_pipe_x = 0
+
+
+pygame.display.set_caption("Flappy Bird")
+
+# importing the images of birds, pipes, background and base
 bird_images = [pygame.image.load("assets/bird_down.png"),
                pygame.image.load("assets/bird_mid.png"),
                pygame.image.load("assets/bird_up.png")]
@@ -25,280 +27,272 @@ bottom_pipe_image = pygame.image.load("assets/pipe_bottom.png")
 game_over_image = pygame.image.load("assets/game_over.png")
 start_image = pygame.image.load("assets/start.png")
 
-# Game
-scroll_speed = 1
-bird_start_position = (100, 250)
-score = 0
-font = pygame.font.SysFont('Segoe', 26)
-game_stopped = True
+# declaring font
+STAT_FONT = pygame.font.SysFont('Segoe', 50)
+game_started = False
 
-# Create the Q-learning model
-model = Sequential()
-model.add(Dense(32, input_shape=(4,), activation='relu'))
-model.add(Dense(32, activation='relu'))
-model.add(Dense(2, activation='linear'))
-model.compile(loss='mse', optimizer=Adam())
 
-# Function to preprocess the game state
-def preprocess_state(bird, pipes):
-    # Normalize the bird's y position and the distance to the next pipe
-    bird_y = bird.rect.y / win_height
-    next_pipe = None
-    for pipe in pipes:
-        if pipe.rect.x > bird.rect.x:
-            next_pipe = pipe
-            break
-    if next_pipe:
-        pipe_dist = (next_pipe.rect.x - bird.rect.x) / win_width
-        pipe_top = next_pipe.rect.y / win_height    
-        pipe_bottom = (next_pipe.rect.y + next_pipe.rect.height) / win_height
-    else:
-        # If there are no pipes, set the distance to 1
-        pipe_dist = 1.0
-        pipe_top = 1.0
-        pipe_bottom = 1.0
-    return np.array([bird_y, pipe_dist, pipe_top, pipe_bottom])
+# CLASS BIRD
+class Bird:
+    ROTATION_VEL = 20
+    MAX_ROTATION = 25
+    ANIMATION_TIME = 5
+    IMGS = bird_images
 
-# Function to choose an action based on the Q-values
-def choose_action(state, epsilon):
-    if np.random.rand() < epsilon:
-        # Choose a random action (exploration)
-        return np.random.randint(2)
-    else:
-        # Choose the action with the highest Q-value (exploitation)
-        q_values = model.predict(np.array([state]))[0]
-        return np.argmax(q_values)
-    
-# Function to update the Q-values based on the Bellman equation
-def update_q_values(states, actions, rewards, next_states, dones, gamma):
-    targets = rewards + gamma * np.max(model.predict(next_states), axis=1) * (1 - dones)
-    q_values = model.predict(states)
-    for i in range(len(actions)):
-        q_values[i][actions[i]] = targets[i]
-    model.fit(states, q_values, verbose=0)
-
-class Bird(pygame.sprite.Sprite):
-    def __init__(self):
-        pygame.sprite.Sprite.__init__(self)
-        self.image = bird_images[0]
-        self.rect = self.image.get_rect()
-        self.rect.center = bird_start_position
-        self.image_index = 0
+    def __init__(self, x, y):  # constructor for class bird
+        self.x = x
+        self.y = y
+        self.height = self.y
+        self.frame_count = 0
+        self.tilt = 0
         self.vel = 0
-        self.flap = False
-        self.alive = True
+        self.img_number = 0  # image in which the bird's wings are upwards
+        self.img = self.IMGS[0]  # image in which the bird's wings are upwards
 
-    def update(self, user_input):
-        # Animate Bird
-        if self.alive:
-            self.image_index += 1
-        if self.image_index >= 30:
-            self.image_index = 0
-        self.image = bird_images[self.image_index // 10]
+    def jump(self):
+        self.vel = -10.5  # negative velocity refers to jump upwards
+        self.frame_count = 0  # reset the frames
+        self.height = self.y  # reset the height
 
-        # Gravity and Flap
-        self.vel += 0.5
-        if self.vel > 7:
-            self.vel = 7
-        if self.rect.y < 500:
-            self.rect.y += int(self.vel)
-        if self.vel == 0:
-            self.flap = False
+    def move(self):
+        self.frame_count += 1  # update the frames when the bird moves
+        # d > 0 means downwards and d<0 means upwards and same for velocity also
+        # and also bird is just moving in y direction and not in x direction
+        d = self.vel * self.frame_count + 1.5 * self.frame_count ** 2  # frame count also works as time
+        if d >= 16:  # if the bird is falling and it falls more than 16 pixels then stop falling and face straight moving
+            d = 16
+        # if d < 0:   # just for tuning so that upward movement is seen clear
+        #     d -= 2
 
-        # Rotate Bird
-        self.image = pygame.transform.rotate(self.image, self.vel * -7)
+        self.y = self.y + d
 
-        # User Input
-        if user_input[pygame.K_SPACE] and not self.flap and self.rect.y > 0 and self.alive:
-            self.flap = True
-            self.vel = -7
+        if d < 0 or self.y < self.height + 50:  # (d<0) this is the case when when bird is going upward
+            if self.tilt < self.MAX_ROTATION:  # so making a tilt angle of max rotation
+                self.tilt = self.MAX_ROTATION
 
-class Pipe(pygame.sprite.Sprite):
-    def __init__(self, x, y, image, pipe_type):
-        pygame.sprite.Sprite.__init__(self)
-        self.image = image
-        self.rect = self.image.get_rect()
-        self.rect.x, self.rect.y = x, y
-        self.enter, self.exit, self.passed = False, False, False
-        self.pipe_type = pipe_type
+        else:
+            if self.tilt > -90:  # if the tilt is greater than -90 then keep on reducing it till it reaches -90 to show
+                self.tilt -= self.ROTATION_VEL  # the arc like falling
 
-    def update(self):
-        # Move Pipe
-        self.rect.x -= scroll_speed
-        if self.rect.x <= -win_width:
-            self.kill()
+    def draw(self, win):
+        self.img_number += 1
 
-        # Score
-        global score
-        if self.pipe_type == 'bottom':
-            if bird_start_position[0] > self.rect.topleft[0] and not self.passed:
-                self.enter = True
-            if bird_start_position[0] > self.rect.topright[0] and not self.passed:
-                self.exit = True
-            if self.enter and self.exit and not self.passed:
-                self.passed = True
-                score += 1
+        # below work is done to show the flapping of the bird
+        # animation time is that for how much time bird should be in one image state
+        if self.img_number < self.ANIMATION_TIME:
+            self.img = self.IMGS[0]
+        elif self.img_number < self.ANIMATION_TIME * 2:
+            self.img = self.IMGS[1]
+        elif self.img_number < self.ANIMATION_TIME * 3:
+            self.img = self.IMGS[2]
+        elif self.img_number < self.ANIMATION_TIME * 4:
+            self.img = self.IMGS[1]
+        elif self.img_number < self.ANIMATION_TIME * 4 + 1:
+            self.img = self.IMGS[0]
+            self.img_number = 0
 
-class Ground(pygame.sprite.Sprite):
-    def __init__(self, x, y):
-        pygame.sprite.Sprite.__init__(self)
-        self.image = ground_image
-        self.rect = self.image.get_rect()
-        self.rect.x, self.rect.y = x, y
+        if self.tilt < -80:  # when the bird is nose diving it should not flap its wings
+            self.img = self.IMGS[1]
+            self.img_number = self.ANIMATION_TIME * 2  # reset the image number so that next image should be IMG[2]
 
-    def update(self):
-        # Move Ground
-        self.rect.x -= scroll_speed
-        if self.rect.x <= -win_width:
-            self.kill()
+        rotated_image = pygame.transform.rotate(self.img, self.tilt)  # just rotating the image around its center
+        new_rect = rotated_image.get_rect(center=self.img.get_rect(topleft=(self.x, self.y)).center)
+        win.blit(rotated_image, new_rect)
 
-def quit_game():
-    # Exit Game
+    def get_mask(self):  # getting the mask of the bird means the contour of bird to check its collision with any pipe
+        return pygame.mask.from_surface(self.img)
+
+
+class Pipe:
+    GAP = 200
+    VEL = 5
+
+    def __init__(self, x):
+        self.x = x
+        self.height = 0  # for random purpose
+        self.top = 0  # y coordinates of top pipe
+        self.bottom = 0  # y coordinates of bottom pipe
+        self.TOP_PIPE = pygame.transform.flip(top_pipe_image, False, True)
+        self.BOTTOM_PIPE = bottom_pipe_image
+        self.passed = False
+        self.set_height()
+
+    def set_height(self):  # randomly setting the heights of both pipes
+        self.height = random.randrange(50, 450)
+        self.bottom = self.height + self.GAP
+        self.top = self.height - self.TOP_PIPE.get_height()
+
+    def move(self):
+        self.x -= self.VEL
+
+    def draw(self, win):
+        win.blit(self.TOP_PIPE, (self.x, self.top))
+        win.blit(self.BOTTOM_PIPE, (self.x, self.bottom))
+
+    def collide(self, bird):  # for checking collision of the bird with the pipes
+        bird_mask = bird.get_mask()
+        top_pipe_mask = pygame.mask.from_surface(self.TOP_PIPE)
+        bottom_pipe_mask = pygame.mask.from_surface(self.BOTTOM_PIPE)
+
+        top_offset = (self.x - bird.x, self.top - round(bird.y))
+        bottom_offset = (self.x - bird.x, self.bottom - round(bird.y))
+
+        top_overlap = bird_mask.overlap(top_pipe_mask, top_offset)
+        bottom_overlap = bird_mask.overlap(bottom_pipe_mask, bottom_offset)
+
+        if top_overlap or bottom_overlap:
+            return True
+        return False
+
+
+# BASE Class for showing base
+class Base:
+    VEL = 5
+    IMG = ground_image
+    WIDTH = ground_image.get_width()
+
+    def __init__(self, y):  # base will be shown moving by taking two images of the same base and putting it one after other
+        self.y = y
+        self.x1 = 0  # here x1 and x2 are the 2 images where x1 comes first and then x2
+        self.x2 = self.WIDTH
+
+    def move(self):
+        self.x1 -= self.VEL
+        self.x2 -= self.VEL
+
+        if self.x1 < -(self.WIDTH):
+            self.x1 = self.x2 + self.WIDTH
+        if self.x2 < -(self.WIDTH):
+            self.x2 = self.x1 + self.WIDTH
+
+    def draw(self, win):
+        win.blit(self.IMG, (self.x1, self.y))
+        win.blit(self.IMG, (self.x2, self.y))
+
+
+# Our main drawing function
+def draw_window(win, birds, pipes, base, score, GEN, pipe_ind):
+    global DRAW_LINES
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
-            exit()
+            quit()
 
-# Game Main Method
-def main():
-    global score
-    
-    # Instantiate Bird
-    bird = Bird()
-    
-    epsilon = 1.0  # Exploration rate
-    epsilon_decay = 0.999  # Decay rate for exploration rate
-    epsilon_min = 0.01  # Minimum exploration rate
-    gamma = 0.99  # Discount factor for future rewards
-    max_episodes = 1000  # Maximum number of episodes
-    max_steps = 1000  # Maximum number of steps per episode
-    
+    win.blit(skyline_image, (0, 0))
+    for pipe in pipes:
+        pipe.draw(win)
+    base.draw(win)
+
+    for bird in birds:
+        try:
+            if DRAW_LINES:
+                pygame.draw.line(win, (255, 0, 0), (bird.x + bird.img.get_width() / 2, bird.y + bird.img.get_height() / 2),
+                                 (pipes[pipe_ind].x + pipes[pipe_ind].TOP_PIPE.get_width() / 2, pipes[pipe_ind].height), 5)
+                pygame.draw.line(win, (255, 0, 0), (bird.x + bird.img.get_width() / 2, bird.y + bird.img.get_height() / 2),
+                                 (pipes[pipe_ind].x + pipes[pipe_ind].BOTTOM_PIPE.get_width() / 2, pipes[pipe_ind].bottom),
+                                 5)
+        except Exception as e:
+            print("Error while drawing lines:", e)
+
+        bird.draw(win)
+
+    text = STAT_FONT.render('Score : ' + str(score), 1, (255, 255, 255))
+    win.blit(text, (WIN_WIDTH - 10 - text.get_width(), 50))
+
+    alive_text = 'Alive : ' + str(len(birds))
+    alive_text_rendered = STAT_FONT.render(alive_text, 1, (255, 255, 255))
+    win.blit(alive_text_rendered, (10, 50))
+
+    pygame.display.update()
+
+
+
+def main(genomes, config):
+    global GEN, last_pipe_x
+    GEN += 1
+    birds = []
+    ge = []
+    neural_networks = []
+
+    pygame.init()
+    win = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
+    pygame.display.set_caption("Flappy Bird")
+
+    for _, g in genomes:
+        net = neat.nn.FeedForwardNetwork.create(g, config)
+        neural_networks.append(net)
+        birds.append(Bird(230, 350))
+        g.fitness = 0
+        ge.append(g)
+
+    pipes = [Pipe(500)]
+    base_object = Base(630)
+    clock = pygame.time.Clock()
     run = True
-    for episode in range(max_episodes):
-        # Setup Pipes
-        pipe_timer = 0
-        pipes = pygame.sprite.Group()
+    score = 0
 
-        # Instantiate Initial Ground
-        x_pos_ground, y_pos_ground = 0, 520
-        ground = pygame.sprite.Group()
-        ground.add(Ground(x_pos_ground, y_pos_ground))
-        
-        # Reset the game...
-        bird.alive = True
-        bird.rect.center = bird_start_position
-        bird.vel = 0
-        score = 0
+    while run:
+        clock.tick(30)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+                pygame.quit()
+                quit()
 
-        for step in range(max_steps):
-            # Quit...
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    exit()
+        pipe_ind = 0
+        if len(birds) > 0:
+            if len(pipes) > 1 and birds[0].x > pipes[0].x + pipes[0].TOP_PIPE.get_width():
+                pipe_ind = 1
+        else:
+            break
 
-            # Reset Frame
-            window.fill((0, 0, 0))
+        for x, bird in enumerate(birds):
+            bird.move()
+            ge[x].fitness += 0.1
+            output = neural_networks[x].activate((bird.y, abs(bird.y - pipes[pipe_ind].height),
+                                                  abs(bird.y - pipes[pipe_ind].bottom)))
+            if output[0] > 0.5:
+                bird.jump()
 
-            # User Input
-            user_input = pygame.key.get_pressed()
+        for pipe in pipes:
+            for x, bird in enumerate(birds):
+                if pipe.collide(bird) or (bird.y + bird.img.get_height() >= 630 or bird.y < 0):
+                    ge[x].fitness -= 1
+                    birds.pop(x)
+                    ge.pop(x)
+                    neural_networks.pop(x)
 
-            # Draw Background
-            window.blit(skyline_image, (0, 0))
+                if not pipe.passed and bird.x > pipe.x:
+                    pipe.passed = True
+                    for g in ge:
+                        g.fitness += 5
+                    score += 1
+                    last_pipe_x = pipe.x
+                    pipes.append(Pipe(last_pipe_x + 200))
 
-            # Spawn Ground
-            if len(ground) <= 2:
-                ground.add(Ground(win_width, y_pos_ground))
+            if pipe.x + pipe.TOP_PIPE.get_width() < 0:
+                pipes.remove(pipe)
 
-            # Draw - Pipes, Ground, and Bird
-            pipes.draw(window)
-            ground.draw(window)
-            window.blit(bird.image, bird.rect)
+            pipe.move()
 
-            # Show Score
-            score_text = font.render('Score: ' + str(score), True, pygame.Color(255, 255, 255))
-            window.blit(score_text, (20, 20))
+        base_object.move()
+        draw_window(win, birds, pipes, base_object, score, GEN, pipe_ind)
 
-            # Choose an action...
-            state = preprocess_state(bird, pipes)
-            action = choose_action(state, epsilon)
+    pygame.quit()
 
-            # Take the action and observe the next state and reward...
-            if action == 0:
-                bird.flap = True
+def run(config_path):
+    config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                                neat.DefaultSpeciesSet, neat.DefaultStagnation, config_path)
+    population = neat.Population(config)
+    population.add_reporter(neat.StdOutReporter(True))
+    stats = neat.StatisticsReporter()
+    population.add_reporter(stats)
 
-            # Update - Pipes, Ground, and Bird
-            if bird.alive:
-                pipes.update()
-                ground.update()
-            bird.update(user_input)
+    winner = population.run(main, 50)
+    print('\nBest genome:\n{!s}'.format(winner))
 
-            # Collision Detection
-            collision_pipes = pygame.sprite.spritecollide(bird, pipes, False)
-            collision_ground = pygame.sprite.spritecollide(bird, ground, False)
-            if collision_pipes or collision_ground:
-                bird.alive = False
-                if collision_ground:
-                    window.blit(game_over_image, (win_width // 2 - game_over_image.get_width() // 2,
-                                                win_height // 2 - game_over_image.get_height() // 2))
-                    if user_input[pygame.K_r]:
-                        score = 0
-                        break
-
-            # Show Score
-
-            # Preprocess the next state...
-            next_state = preprocess_state(bird, pipes)
-
-            # Determine the reward...
-            reward = 1 if bird.alive else -1
-
-            # Determine if the episode is done...
-            done = not bird.alive
-
-            # Update the Q-values...
-            update_q_values(np.array([state]), np.array([action]), np.array([reward]), np.array([next_state]), np.array([done]), gamma)
-
-            # Spawn Pipes
-            if pipe_timer <= 0 and bird.alive:
-                x_top, x_bottom = 550, 550
-                y_top = random.randint(-600, -480)
-                y_bottom = y_top + random.randint(90, 130) + bottom_pipe_image.get_height()
-                pipes.add(Pipe(x_top, y_top, top_pipe_image, 'top'))
-                pipes.add(Pipe(x_bottom, y_bottom, bottom_pipe_image, 'bottom'))
-                pipe_timer = random.randint(180, 250)
-            pipe_timer -= 1
-
-            clock.tick(60)
-            pygame.display.update()
-
-            if done:
-                break
-
-        # Decay the exploration rate...
-        epsilon *= epsilon_decay
-        epsilon = max(epsilon, epsilon_min)
-
-# Menu
-def menu():
-    global game_stopped
-
-    while game_stopped:
-        quit_game() 
-
-        # Draw Menu
-        window.fill((0, 0, 0))
-        window.blit(skyline_image, (0, 0))
-        window.blit(ground_image, Ground(0, 520))
-        window.blit(bird_images[0], (100, 250))
-        window.blit(start_image, (win_width // 2 - start_image.get_width() // 2,
-                                  win_height // 2 - start_image.get_height() // 2))
-
-        # User Input
-        user_input = pygame.key.get_pressed()
-        if user_input[pygame.K_SPACE]:
-            main()
-
-        pygame.display.update()
-
-menu()
+if __name__ == '__main__':
+    config_path = "config-feedforward.txt"
+    run(config_path)
+    config_path = "config-feedforward.txt"
+    run(config_path)
