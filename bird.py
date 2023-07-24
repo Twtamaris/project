@@ -26,7 +26,7 @@ game_over_image = pygame.image.load("assets/game_over.png")
 start_image = pygame.image.load("assets/start.png")
 
 # declaring font
-STAT_FONT = pygame.font.SysFont('freesansbold', 50)
+STAT_FONT = pygame.font.SysFont('opensans', 50)
 game_started = False
 
 
@@ -44,8 +44,8 @@ class Bird:
         self.frame_count = 0
         self.tilt = 0
         self.vel = 0
-        self.img_number = 0  # image in which the bird's wings are upwards
-        self.img = self.IMGS[0]  # image in which the bird's wings are upwards
+        self.img_number = 2  # image in which the bird's wings are upwards
+        self.img = self.IMGS[2]  # image in which the bird's wings are upwards
 
     def jump(self):
         self.vel = -10.5  # negative velocity refers to jump upwards
