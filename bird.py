@@ -26,7 +26,7 @@ game_over_image = pygame.image.load("assets/game_over.png")
 start_image = pygame.image.load("assets/start.png")
 
 # declaring font
-STAT_FONT = pygame.font.SysFont('opensans', 50)
+STAT_FONT = pygame.font.SysFont('impact', 50)
 game_started = False
 
 
@@ -44,8 +44,8 @@ class Bird:
         self.frame_count = 0
         self.tilt = 0
         self.vel = 0
-        self.img_number = 2  # image in which the bird's wings are upwards
-        self.img = self.IMGS[2]  # image in which the bird's wings are upwards
+        self.img_number = 0  # image in which the bird's wings are upwards
+        self.img = self.IMGS[0]  # image in which the bird's wings are upwards
 
     def jump(self):
         self.vel = -10.5  # negative velocity refers to jump upwards
@@ -64,6 +64,8 @@ class Bird:
 
         self.y = self.y + d
 
+        # print("d:", d, "self.y:", self.y, "self.height:", self.height, "self.vel:", self.vel, "self.frame_count:", self.frame_count)
+
         if d < 0 or self.y < self.height + 50:  # (d<0) this is the case when when bird is going upward
             if self.tilt < self.MAX_ROTATION:  # so making a tilt angle of max rotation
                 self.tilt = self.MAX_ROTATION
@@ -71,9 +73,11 @@ class Bird:
         else:
             if self.tilt > -90:  # if the tilt is greater than -90 then keep on reducing it till it reaches -90 to show
                 self.tilt -= self.ROTATION_VEL  # the arc like falling
+        
 
     def draw(self, win):
         self.img_number += 1
+        print(self.img_number)
 
         # below work is done to show the flapping of the bird
         # animation time is that for how much time bird should be in one image state
