@@ -1,6 +1,7 @@
 import pygame
 from sys import exit
 import random
+import neat
 
 pygame.init()
 clock = pygame.time.Clock()
@@ -27,6 +28,9 @@ bird_start_position = (100, 250)
 score = 0
 font = pygame.font.SysFont('Segoe', 26)
 game_stopped = True
+
+GEN = 0
+
 
 
 class Bird(pygame.sprite.Sprite):
@@ -118,12 +122,14 @@ def quit_game():
 
 
 # Game Main Method
-def main():
-    global score
+def main(genomes, config):
+    global score, GEN
+    
+    GEN += 1
+    birds = []
+    ge = []
+    neural_networks = []
 
-    # Instantiate Bird
-    bird = pygame.sprite.GroupSingle()
-    bird.add(Bird())
 
     # Setup Pipes
     pipe_timer = 0
@@ -133,6 +139,18 @@ def main():
     x_pos_ground, y_pos_ground = 0, 520
     ground = pygame.sprite.Group()
     ground.add(Ground(x_pos_ground, y_pos_ground))
+    
+    for _, g in genomes:
+        net = neat.nn.FeedForwardNetwork.create(g, config)
+        neural_networks.append(net)
+        bird = Bird()
+        birds.append(bird)
+        ge.append(g)
+        g.fitness = 0
+        
+    bird_group = pygame.sprite.Group(birds)
+
+    
 
     run = True
     while run:
@@ -152,10 +170,27 @@ def main():
         if len(ground) <= 2:
             ground.add(Ground(win_width, y_pos_ground))
 
+        nearest_pipe_ind = 0
+        pipe_list = pipes.sprites()
+        if len(pipe_list) > 1:
+            if birds[0].rect.centerx > pipe_list[0].rect.centerx:
+                nearest_pipe_ind = 1
+
         # Draw - Pipes, Ground and Bird
         pipes.draw(window)
         ground.draw(window)
-        bird.draw(window)
+        bird_group.draw(window)
+        for x, bird in enumerate(birds):
+            bird.update(user_input)
+            ge[x].fitness += 0.1
+
+            input_data = (bird.rect.y, abs(bird.rect.y - pipes[nearest_pipe_ind].rect.height),
+                          abs(bird.rect.y - pipes[nearest_pipe_ind].rect.bottom))
+
+            output = neural_networks[x].activate(input_data)
+            if output[0] > 0.5:
+                bird.flap = True
+                bird.vel = -7
 
         # Show Score
         score_text = font.render('Score: ' + str(score), True, pygame.Color(255, 255, 255))
@@ -191,9 +226,26 @@ def main():
 
         clock.tick(60)
         pygame.display.update()
+        
 
+def run_neat(config_file):
+    # Load NEAT configuration
+    config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                         neat.DefaultSpeciesSet, neat.DefaultStagnation, config_file)
 
-# Menu
+    # Create a population
+    population = neat.Population(config)
+
+    # Add a reporter to show progress in the terminal
+    population.add_reporter(neat.StdOutReporter(True))
+    stats = neat.StatisticsReporter()
+    population.add_reporter(stats)
+
+    # Run the NEAT algorithm
+    winner = population.run(main, 50) 
+        
+        
+# Run NEAT algorithm
 def menu():
     global game_stopped
 
@@ -211,9 +263,10 @@ def menu():
         # User Input
         user_input = pygame.key.get_pressed()
         if user_input[pygame.K_SPACE]:
-            main()
+            run_neat("config-feedforward.txt")  # Start the NEAT algorithm
 
         pygame.display.update()
 
 
 menu()
+

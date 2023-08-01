@@ -1,5 +1,6 @@
 import pygame
 import time
+import neat
 import os
 import random
 
@@ -9,6 +10,7 @@ WIN_HEIGHT = 800
 WIN_WIDTH = 500
 DRAW_LINES = False
 GEN = 0  # declaring generation variable
+
 
 pygame.display.set_caption("Flappy Bird")
 
@@ -71,6 +73,7 @@ class Bird:
         else:
             if self.tilt > -90:  # if the tilt is greater than -90 then keep on reducing it till it reaches -90 to show
                 self.tilt -= self.ROTATION_VEL  # the arc like falling
+        
 
     def draw(self, win):
         self.img_number += 1
@@ -119,9 +122,11 @@ class Pipe:
         self.height = random.randrange(50, 450)
         self.bottom = self.height + self.GAP
         self.top = self.height - self.TOP_PIPE.get_height()
+        # print(self.height, self.bottom, self.top)
 
     def move(self):
         self.x -= self.VEL
+        print(self.x)
 
     def draw(self, win):
         win.blit(self.TOP_PIPE, (self.x, self.top))
@@ -169,7 +174,7 @@ class Base:
 
 
 # Our main drawing function
-def draw_window(win, bird, pipes, base, score):
+def draw_window(win, birds, pipes, base, score, GEN, pipe_ind):
     global DRAW_LINES
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -181,34 +186,75 @@ def draw_window(win, bird, pipes, base, score):
         pipe.draw(win)
     base.draw(win)
 
-    bird.draw(win)
+    for bird in birds:
+        try:
+            if DRAW_LINES:
+                pygame.draw.line(win, (255, 0, 0), (bird.x + bird.img.get_width() / 2, bird.y + bird.img.get_height() / 2),
+                                 (pipes[pipe_ind].x + pipes[pipe_ind].TOP_PIPE.get_width() / 2, pipes[pipe_ind].height), 5)
+                pygame.draw.line(win, (255, 0, 0), (bird.x + bird.img.get_width() / 2, bird.y + bird.img.get_height() / 2),
+                                 (pipes[pipe_ind].x + pipes[pipe_ind].BOTTOM_PIPE.get_width() / 2, pipes[pipe_ind].bottom),
+                                 5)
+        except Exception as e:
+            print("Error while drawing lines:", e)
+
+        bird.draw(win)
 
     text = STAT_FONT.render('Score : ' + str(score), 1, (255, 255, 255))
     win.blit(text, (WIN_WIDTH - 10 - text.get_width(), 50))
 
-    alive_text = 'Alive : 1'
+    alive_text = 'Alive : ' + str(len(birds))
     alive_text_rendered = STAT_FONT.render(alive_text, 1, (255, 255, 255))
     win.blit(alive_text_rendered, (10, 50))
 
     pygame.display.update()
 
 
-def main():
-    global GEN, game_started
 
+def main(genomes, config):
+    global GEN, game_started
+    GEN += 1
+    birds = []
+    ge = []
+    neural_networks = []
+    
     pygame.init()
     win = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
     pygame.display.set_caption("Flappy Bird")
 
-    bird = Bird(230, 350)
+    for _, g in genomes:
+        net = neat.nn.FeedForwardNetwork.create(g, config)
+        neural_networks.append(net)
+        birds.append(Bird(230, 350))
+        g.fitness = 0
+        ge.append(g)
+
     pipes = [Pipe(500)]  # list of pipe objects
     base_object = Base(630)
+    win = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
     clock = pygame.time.Clock()
     run = True
     score = 0
-    bird_jump = False
+    # while game_started == False:
+    #     win.fill((0, 0, 0))
+    #     win.blit(skyline_image, (0, 0))
+    #     win.blit(ground_image, (0, 520))
+    #     win.blit(bird_images[0], (100, 250))
+    #     win.blit(start_image, (WIN_WIDTH // 2 - start_image.get_width() // 2,
+    #                            WIN_HEIGHT // 2 - start_image.get_height() // 2))
+
+    #     # User Input
+    #     user_input = pygame.key.get_pressed()
+    #     if user_input[pygame.K_SPACE]:
+    #         game_started = True
+
+    #     pygame.display.update()
+
+
+
+    # OUR main running loop
 
     while run:
+        
         clock.tick(30)  # fps
         for event in pygame.event.get():
             if event.type == pygame.QUIT:  # if the user click on the red cross button then quit the game
@@ -216,36 +262,40 @@ def main():
                 pygame.quit()
                 quit()
 
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE and not bird_jump:
-                    bird.jump()
-                    bird_jump = True
-
-            if event.type == pygame.KEYUP:
-                if event.key == pygame.K_SPACE:
-                    bird_jump = False
-
         pipe_ind = 0
 
         # this part is done to check in the case when 2 pipes appear on the screen that which is the pipe we are evaluating on
-        if len(pipes) > 1 and bird.x > pipes[0].x + pipes[0].TOP_PIPE.get_width():
-            pipe_ind = 1
+        if len(birds) > 0:
+            if len(pipes) > 1 and birds[0].x > pipes[0].x + pipes[0].TOP_PIPE.get_width():
+                pipe_ind = 1
 
-        bird.move()
+        else:  # if all the birds are dead then exit the loop
+            break
+
+        for x, bird in enumerate(birds):  # traversing every bird
+            bird.move()
+            ge[x].fitness += 0.1  # incrementing little fitness to keep them moving
+            # this is the output list which the nn is giving for all the birds whether to jump or not
+            output = neural_networks[x].activate((bird.y, abs(bird.y - pipes[pipe_ind].height),
+                                                  abs(bird.y - pipes[pipe_ind].bottom)))
+            if output[0] > 0.5:
+                bird.jump()
+
         for pipe in pipes:
-            # checking if the bird has hit the ground or if the pipe and bird collide
-            if pipe.collide(bird) or bird.y + bird.img.get_height() >= 630 or bird.y < 0:
-                game_over_text = STAT_FONT.render('Game Over', 1, (255, 255, 255))
-                win.blit(game_over_text, (WIN_WIDTH // 2 - game_over_text.get_width() // 2,
-                                          WIN_HEIGHT // 2 - game_over_text.get_height() // 2))
-                pygame.display.update()
-                time.sleep(2)
-                main()
+            for x, bird in enumerate(birds):
+                # checking if the bird has hit the ground or if the pipe and bird collide
+                if pipe.collide(bird) or (bird.y + bird.img.get_height() >= 630 or bird.y < 0):
+                    ge[x].fitness -= 1  # remove all things of that bird from that bird's position
+                    birds.pop(x)
+                    ge.pop(x)
+                    neural_networks.pop(x)
 
-            if not pipe.passed and bird.x > pipe.x:  # if the passed is not set to true and bird has passed the pipe then set it to true
-                pipe.passed = True
-                score += 1
-                pipes.append(Pipe(500))  # add another pipe
+                if not pipe.passed and bird.x > pipe.x:  # if the passed is not set to true and bird has passed the pipe then set it to true
+                    pipe.passed = True
+                    for g in ge:
+                        g.fitness += 5  # adding fitness to birds which passed
+                    score += 1
+                    pipes.append(Pipe(500))  # add another pipe
 
             if pipe.x + pipe.TOP_PIPE.get_width() < 0:  # if pipe passed the screen add it to remove list
                 pipes.remove(pipe)
@@ -253,10 +303,23 @@ def main():
             pipe.move()
 
         base_object.move()
-        draw_window(win, bird, pipes, base_object, score)
+        draw_window(win, birds, pipes, base_object, score, GEN, pipe_ind)
 
     pygame.quit()
 
 
+def run(config_path):
+    config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                                neat.DefaultSpeciesSet, neat.DefaultStagnation, config_path)
+    population = neat.Population(config)
+    population.add_reporter(neat.StdOutReporter(True))
+    stats = neat.StatisticsReporter()
+    population.add_reporter(stats)
+
+    winner = population.run(main, 50)
+    print('\nBest genome:\n{!s}'.format(winner))
+
+
 if __name__ == '__main__':
-    main()
+    config_path = "config-feedforward.txt"
+    run(config_path)
