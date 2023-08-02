@@ -29,9 +29,6 @@ score = 0
 font = pygame.font.SysFont('Segoe', 26)
 game_stopped = True
 
-GEN = 0
-
-
 
 class Bird(pygame.sprite.Sprite):
     def __init__(self):
@@ -43,6 +40,11 @@ class Bird(pygame.sprite.Sprite):
         self.vel = 0
         self.flap = False
         self.alive = True
+
+    def flap_wings(self):
+        self.flap = True
+        self.vel = -7
+    
 
     def update(self, user_input):
         # Animate Bird
@@ -65,10 +67,10 @@ class Bird(pygame.sprite.Sprite):
         # Rotate Bird
         self.image = pygame.transform.rotate(self.image, self.vel * -7)
 
-        # User Input
-        if user_input[pygame.K_SPACE] and not self.flap and self.rect.y > 0 and self.alive:
-            self.flap = True
-            self.vel = -7
+        # # User Input
+        # if user_input[pygame.K_SPACE] and not self.flap and self.rect.y > 0 and self.alive:
+        #     self.flap = True
+        #     self.vel = -7
 
 
 class Pipe(pygame.sprite.Sprite):
@@ -121,15 +123,14 @@ def quit_game():
             exit()
 
 
-# Game Main Method
-def main(genomes, config):
-    global score, GEN
-    
-    GEN += 1
-    birds = []
-    ge = []
-    neural_networks = []
 
+# NEAT Training Function
+def eval_genomes(genomes, config):
+    global score
+
+    birds = []
+    neural_networks = []
+    ge = []
 
     # Setup Pipes
     pipe_timer = 0
@@ -139,29 +140,27 @@ def main(genomes, config):
     x_pos_ground, y_pos_ground = 0, 520
     ground = pygame.sprite.Group()
     ground.add(Ground(x_pos_ground, y_pos_ground))
-    
-    for _, g in genomes:
-        net = neat.nn.FeedForwardNetwork.create(g, config)
+
+    for genome_id, genome in genomes:
+        net = neat.nn.FeedForwardNetwork.create(genome, config)
         neural_networks.append(net)
         bird = Bird()
         birds.append(bird)
-        ge.append(g)
-        g.fitness = 0
-        
-    bird_group = pygame.sprite.Group(birds)
+        ge.append(genome)
+        genome.fitness = 0
 
-    
+    bird_group = pygame.sprite.Group(birds)
 
     run = True
     while run:
         # Quit
-        quit_game()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
 
         # Reset Frame
         window.fill((0, 0, 0))
-
-        # User Input
-        user_input = pygame.key.get_pressed()
 
         # Draw Background
         window.blit(skyline_image, (0, 0))
@@ -170,52 +169,57 @@ def main(genomes, config):
         if len(ground) <= 2:
             ground.add(Ground(win_width, y_pos_ground))
 
-        nearest_pipe_ind = 0
-        pipe_list = pipes.sprites()
-        if len(pipe_list) > 1:
-            if birds[0].rect.centerx > pipe_list[0].rect.centerx:
-                nearest_pipe_ind = 1
-
         # Draw - Pipes, Ground and Bird
         pipes.draw(window)
         ground.draw(window)
         bird_group.draw(window)
-        for x, bird in enumerate(birds):
-            bird.update(user_input)
-            ge[x].fitness += 0.1
-
-            input_data = (bird.rect.y, abs(bird.rect.y - pipes[nearest_pipe_ind].rect.height),
-                          abs(bird.rect.y - pipes[nearest_pipe_ind].rect.bottom))
-
-            output = neural_networks[x].activate(input_data)
-            if output[0] > 0.5:
-                bird.flap = True
-                bird.vel = -7
 
         # Show Score
         score_text = font.render('Score: ' + str(score), True, pygame.Color(255, 255, 255))
         window.blit(score_text, (20, 20))
 
-        # Update - Pipes, Ground and Bird
-        if bird.sprite.alive:
-            pipes.update()
-            ground.update()
-        bird.update(user_input)
+        for bird, net, genome in zip(birds, neural_networks, ge):
+            input_data = None  # Initialize the variable here
+            if bird.alive:
+                pipes.update()
+                ground.update()
 
-        # Collision Detection
-        collision_pipes = pygame.sprite.spritecollide(bird.sprites()[0], pipes, False)
-        collision_ground = pygame.sprite.spritecollide(bird.sprites()[0], ground, False)
-        if collision_pipes or collision_ground:
-            bird.sprite.alive = False
-            if collision_ground:
-                window.blit(game_over_image, (win_width // 2 - game_over_image.get_width() // 2,
-                                              win_height // 2 - game_over_image.get_height() // 2))
-                if user_input[pygame.K_r]:
-                    score = 0
-                    break
+                # Neural Network Input
+                nearest_pipe_ind = 0
+                pipe_list = pipes.sprites()  # Convert group to a list of sprites
+                if len(pipe_list) > 1:
+                    if bird.rect.centerx > pipe_list[0].rect.centerx:
+                        nearest_pipe_ind = 1
+
+                if nearest_pipe_ind < len(pipe_list):
+                    input_data = (bird.rect.y, abs(bird.rect.y - pipe_list[nearest_pipe_ind].rect.height), 
+                                  abs(bird.rect.y - pipe_list[nearest_pipe_ind].rect.bottom))
+
+                if input_data is not None:  # Check if input_data is assigned a value before using it
+                    output = net.activate(input_data)
+                else:
+                    output = [0]  # Set default value if input_data is None
+
+                if output[0] > 0.5:
+                    bird.flap_wings()
+
+                # ... (existing code)
+
+
+            collision_pipes = pygame.sprite.spritecollide(bird, pipes, False)
+            collision_ground = pygame.sprite.spritecollide(bird, ground, False)
+            if collision_pipes or collision_ground:
+                bird.alive = False
+                genome.fitness -= 1
+
+            # Check if the bird passed a pipe
+            for pipe in pipes:
+                if pipe.pipe_type == 'bottom' and bird.rect.centerx > pipe.rect.centerx and not pipe.passed:
+                    pipe.passed = True
+                    genome.fitness += 5
 
         # Spawn Pipes
-        if pipe_timer <= 0 and bird.sprite.alive:
+        if pipe_timer <= 0 and any(bird.alive for bird in birds):
             x_top, x_bottom = 550, 550
             y_top = random.randint(-600, -480)
             y_bottom = y_top + random.randint(110, 130) + bottom_pipe_image.get_height()
@@ -226,8 +230,12 @@ def main(genomes, config):
 
         clock.tick(60)
         pygame.display.update()
-        
 
+        # Check if all birds are dead
+        if not any(bird.alive for bird in birds):
+            break
+
+# Run NEAT algorithm
 def run_neat(config_file):
     # Load NEAT configuration
     config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
@@ -242,10 +250,11 @@ def run_neat(config_file):
     population.add_reporter(stats)
 
     # Run the NEAT algorithm
-    winner = population.run(main, 50) 
-        
-        
-# Run NEAT algorithm
+    winner = population.run(eval_genomes, 50)
+
+    print("Best genome:\n", winner)
+
+
 def menu():
     global game_stopped
 
@@ -269,4 +278,3 @@ def menu():
 
 
 menu()
-
