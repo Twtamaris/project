@@ -1,5 +1,4 @@
 import pygame
-from sys import exit
 import random
 import neat
 
@@ -19,15 +18,12 @@ skyline_image = pygame.image.load("assets/background.png")
 ground_image = pygame.image.load("assets/ground.png")
 top_pipe_image = pygame.image.load("assets/pipe_top.png")
 bottom_pipe_image = pygame.image.load("assets/pipe_bottom.png")
-game_over_image = pygame.image.load("assets/game_over.png")
-start_image = pygame.image.load("assets/start.png")
 
 # Game
 scroll_speed = 3
 bird_start_position = (100, 250)
 score = 0
 font = pygame.font.SysFont('Segoe', 26)
-game_stopped = True
 
 
 class Bird(pygame.sprite.Sprite):
@@ -44,9 +40,8 @@ class Bird(pygame.sprite.Sprite):
     def flap_wings(self):
         self.flap = True
         self.vel = -7
-    
 
-    def update(self, user_input):
+    def update(self):
         # Animate Bird
         if self.alive:
             self.image_index += 1
@@ -59,18 +54,12 @@ class Bird(pygame.sprite.Sprite):
         if self.vel > 7:
             self.vel = 7
         if self.rect.y < 500:
-
             self.rect.y += int(self.vel)
         if self.vel == 0:
             self.flap = False
 
         # Rotate Bird
         self.image = pygame.transform.rotate(self.image, self.vel * -7)
-
-        # # User Input
-        # if user_input[pygame.K_SPACE] and not self.flap and self.rect.y > 0 and self.alive:
-        #     self.flap = True
-        #     self.vel = -7
 
 
 class Pipe(pygame.sprite.Sprite):
@@ -92,7 +81,6 @@ class Pipe(pygame.sprite.Sprite):
         global score
         if self.pipe_type == 'bottom':
             if bird_start_position[0] > self.rect.topleft[0] and not self.passed:
-                print("Entry")
                 self.enter = True
             if bird_start_position[0] > self.rect.topright[0] and not self.passed:
                 self.exit = True
@@ -113,15 +101,6 @@ class Ground(pygame.sprite.Sprite):
         self.rect.x -= scroll_speed
         if self.rect.x <= -win_width:
             self.kill()
-
-
-def quit_game():
-    # Exit Game
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            exit()
-
 
 
 # NEAT Training Function
@@ -159,6 +138,11 @@ def eval_genomes(genomes, config):
                 pygame.quit()
                 exit()
 
+        # User Input
+        user_input = pygame.key.get_pressed()
+        if user_input[pygame.K_ESCAPE]:  # Press ESC to stop the NEAT training loop
+            run = False
+
         # Reset Frame
         window.fill((0, 0, 0))
 
@@ -179,44 +163,45 @@ def eval_genomes(genomes, config):
         window.blit(score_text, (20, 20))
 
         for bird, net, genome in zip(birds, neural_networks, ge):
-            input_data = None  # Initialize the variable here
             if bird.alive:
                 pipes.update()
                 ground.update()
 
                 # Neural Network Input
                 nearest_pipe_ind = 0
-                pipe_list = pipes.sprites()  # Convert group to a list of sprites
+                pipe_list = pipes.sprites()
                 if len(pipe_list) > 1:
                     if bird.rect.centerx > pipe_list[0].rect.centerx:
                         nearest_pipe_ind = 1
 
                 if nearest_pipe_ind < len(pipe_list):
-                    input_data = (bird.rect.y, abs(bird.rect.y - pipe_list[nearest_pipe_ind].rect.height), 
+                    input_data = (bird.rect.y, abs(bird.rect.y - pipe_list[nearest_pipe_ind].rect.height),
                                   abs(bird.rect.y - pipe_list[nearest_pipe_ind].rect.bottom))
+                else:
+                    input_data = None
 
-                if input_data is not None:  # Check if input_data is assigned a value before using it
+                if input_data is not None:
                     output = net.activate(input_data)
                 else:
-                    output = [0]  # Set default value if input_data is None
+                    output = [0]
 
                 if output[0] > 0.5:
                     bird.flap_wings()
 
-                # ... (existing code)
+                # Move Bird
+                bird.update()
 
+                collision_pipes = pygame.sprite.spritecollide(bird, pipes, False)
+                collision_ground = pygame.sprite.spritecollide(bird, ground, False)
+                if collision_pipes or collision_ground:
+                    bird.alive = False
+                    genome.fitness -= 1
 
-            collision_pipes = pygame.sprite.spritecollide(bird, pipes, False)
-            collision_ground = pygame.sprite.spritecollide(bird, ground, False)
-            if collision_pipes or collision_ground:
-                bird.alive = False
-                genome.fitness -= 1
-
-            # Check if the bird passed a pipe
-            for pipe in pipes:
-                if pipe.pipe_type == 'bottom' and bird.rect.centerx > pipe.rect.centerx and not pipe.passed:
-                    pipe.passed = True
-                    genome.fitness += 5
+                # Check if the bird passed a pipe
+                for pipe in pipes:
+                    if pipe.pipe_type == 'bottom' and bird.rect.centerx > pipe.rect.centerx and not pipe.passed:
+                        pipe.passed = True
+                        genome.fitness += 5
 
         # Spawn Pipes
         if pipe_timer <= 0 and any(bird.alive for bird in birds):
@@ -234,6 +219,7 @@ def eval_genomes(genomes, config):
         # Check if all birds are dead
         if not any(bird.alive for bird in birds):
             break
+
 
 # Run NEAT algorithm
 def run_neat(config_file):
@@ -255,26 +241,10 @@ def run_neat(config_file):
     print("Best genome:\n", winner)
 
 
-def menu():
-    global game_stopped
-
-    while game_stopped:
-        quit_game()
-
-        # Draw Menu
-        window.fill((0, 0, 0))
-        window.blit(skyline_image, (0, 0))
-        window.blit(ground_image, Ground(0, 520))
-        window.blit(bird_images[0], (100, 250))
-        window.blit(start_image, (win_width // 2 - start_image.get_width() // 2,
-                                  win_height // 2 - start_image.get_height() // 2))
-
-        # User Input
-        user_input = pygame.key.get_pressed()
-        if user_input[pygame.K_SPACE]:
-            run_neat("config-feedforward.txt")  # Start the NEAT algorithm
-
-        pygame.display.update()
+# Main function
+def main():
+    run_neat("config-feedforward.txt")
 
 
-menu()
+if __name__ == "__main__":
+    main()
